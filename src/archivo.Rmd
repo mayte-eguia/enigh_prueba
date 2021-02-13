@@ -1,79 +1,111 @@
 ---
 title: "ENIGH"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 library(tidyverse)
-library (data.table)
+library(data.table)
 
-base <- read_csv("concentradohogar.csv")
+concentrado <- read_csv(here::here("data/raw/concentradohogar.csv"))
 ```
  
 ## PRÁCTICA 1
 1. ¿Cuántos folios de vivienda únicos hay en los datos?
 ```{r}
-vivienda <- n_distinct (base$folioviv)
+vivienda <- concentrado %>% 
+  summarise(total = n_distinct(folioviv)) %>% 
+  pull(total) %>% 
+  scales::comma()
 ```
 Por lo que el total de viviendas son: `r vivienda` 
 
 2. ¿Cuántas combinaciones diferentes hay de folioviv y folihog?
 ```{r}
-dim_base <- dim(base)
-dim_comb <- base %>% distinct(folioviv, foliohog, .keep_all = T) %>% dim()
+filas <- concentrado %>% 
+  summarise(filas = n()) %>% 
+  pull(filas) %>% 
+  scales::comma()
+
+combinaciones <- concentrado %>%
+  distinct(folioviv, foliohog, .keep_all = T) %>% 
+  summarise(total_unicos = n()) %>% 
+  pull(total_unicos) %>% 
+  scales::comma()
+
 ```
-El numero de combinaciones distintas es `r dim_comb[1]`que coincide con el número de filas de nuestra base (`r dim_base[1]`). Por lo que, podemos asegurar que cada vivienda tiene un folio respectivo distinto. 
+El numero de combinaciones distintas es `r filas`que coincide con el número de filas de nuestra base (`r combinaciones`). Por lo que, podemos asegurar que cada vivienda tiene un folio respectivo distinto. 
 
 3. En la nota técnica del INEGI se menciona que tamaño de la muestra es de 87,826 hogares, ¿vemos este número en los datos? Si no, ¿por qué?
 
-No, el número de hogares es `r dim_base[1]`. No coincide, puesto que al momento de muestrar nos encontramos con viviendas que contestan toda la encuesta, con viviendas que contestan solo algunas preguntas y viviendas que no respondieron por lo que no se consideran. Que es el `r 100 - ((dim_base[1]*100)/ 87826)`%.
+No, el número de hogares es `r filas`. No coincide, puesto que al momento de muestrar nos encontramos con viviendas que contestan toda la encuesta, con viviendas que contestan solo algunas preguntas y viviendas que no respondieron por lo que no se consideran. Que es el 
 
 4. Un amigo tuyo intenta calcular los deciles del ingresos de los hogares de la siguiente forma y te pide ayuda:
 ```{r}
 cortes <- seq(0, 1, by = 0.1)
-deciles <- base %>% 
+deciles <- concentrado %>% 
     summarise(valor = quantile(ing_cor, cortes), 
               decil = paste0('d', cortes * 10))
 ```
+
 Al reorganizar su frame de forma descendente, le da lo siguiente:
 ```{r}
 deciles %>% 
     relocate(decil) %>% 
     arrange(desc(decil), valor)
+
 ```
 ¿Cuál es el problema y cómo puede solucionarlo?
 El problema es que no puedes ordenar un caracter.
 ```{r}
 deciles %>% 
-    relocate(decil) %>% 
-    arrange(desc(valor), decil)
+    mutate(decil_factor = fct_reorder(decil, valor)) %>% 
+    relocate(decil_factor) %>% 
+    arrange(desc(decil_factor))
 ```
 
 5. Un amigo diferente (que curiosamente está trabajando en el mismo proyecto con la ENIGH) te dice que no entiende por qué sus folios de vivienda se ven diferentes que a los demas. Te enseña su código y ves esto:
 ```{r}
-concentrado <- read_csv('concentradohogar.csv',
-                        col_types = cols(folioviv = col_number()))
+# concentrado_ <- read_csv('concentradohogar.csv',
+#                         col_types = cols(folioviv = col_number()))
+
 ```
-Nosotrosos sabemos que folioviv es la unión de diversas columnas, por lo que al aplicar lo anterior sucede que cambia la clase de distintas columnas que la componen. Sin observar que antes la columna "folioviv" ya era númerica.
+Nosotros sabemos que folioviv es la unión de diversas columnas, por lo que al aplicar lo anterior sucede que cambia la clase de distintas columnas que la componen. Sin observar que antes la columna "folioviv" ya era númerica.
 ```{r}
-x <- lapply(base, class) %>% unlist( use.names = TRUE)
-y <- lapply(concentrado, class) %>% unlist(use.names = TRUE)
-cambiaron <- sum(ifelse(x == y, 0, 1))
+base_r_classes <- read.csv(here::here("data/raw/concentradohogar.csv")) %>% 
+  summarise(across(everything(), ~ class(.x))) %>% 
+  pivot_longer(everything(), 
+               names_to = "variables", 
+               values_to = "clase")
+
+tidy_classes <- concentrado %>% 
+  summarise(across(everything(), ~ class(.x))) %>% 
+  pivot_longer(everything(), 
+               names_to = "variables", 
+               values_to = "clase")
+
 ```
-Al final terminaron cambiando `r cambiaron` columnas. 
 
 6. El descriptor de archivos, en su página 160, menciona que el ingreso corriente es la suma de las variables: ingtrab, rentas, transfer, estim_alqu y otros_ing. ¿Esto es cierto? ¿Es posible demostrarlo usando solo select, pivot_longer, group_by, summarise y filter?
 ```{r}
-base %>% select(ingtrab,rentas,transfer, estim_alqu, otros_ing, ing_cor) %>%
-  mutate(Ingreso = round(ingtrab + rentas + transfer + estim_alqu + otros_ing,2)) %>%
-  mutate(Comprobacion = Ingreso == ing_cor)
+concentrado %>%
+  select(folioviv, ingtrab, rentas, transfer, estim_alqu, otros_ing, ing_cor) %>% 
+  pivot_longer(-c(folioviv, ing_cor)) %>% 
+  group_by(folioviv, ing_cor) %>% 
+  summarise(ing_cor_calc = sum(value)) %>% 
+  filter(as.integer(ing_cor_calc) != as.integer(ing_cor))
 ```
 
 7. ¿Esta sección de la tabla está tidy? ¿Basta con un pivot_longer para poner este frame tidy? En caso que no, ¿qué axioma está violando?
 
 ```{r}
-base%>% select (folioviv, foliohog, hombres, mujeres, ing_cor, 
-                perc_ocupa) %>% tibble() %>% head()
+concentrado %>%
+  select(folioviv, foliohog, hombres, mujeres, ing_cor, perc_ocupa) %>%
+  tibble() %>%
+  head()
+
 ```
 
-Si está ordenada,en caso de que no estuviera ordenada no se podría hacer un pivot_longer(), puesto que no hay datos significativos que se repitan y puedan asignarse como nuevos nombres de las columnas. 
+Sí está ordenada,en caso de que no estuviera ordenada no se podría hacer un pivot_longer(), puesto que no hay datos significativos que se repitan y puedan asignarse como nuevos nombres de las columnas. 
